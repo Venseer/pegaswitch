@@ -149,6 +149,37 @@ const fns = {
 			}
 		}
 	},
+	runnro: {
+		response: 'rannro',
+		help: 'runnro <filename>',
+		helptext: 'Executes the given NRO',
+		complete: function (line) {
+			var args = line.split(' ');
+			var dirPath = './';
+			var path = '';
+			var match = args[1].match(/^.*[/\\]/);
+			if (match !== null) {
+				dirPath = path = match[0];
+			}
+			var matchPiece = args[1].substr(path.length);
+			try {
+				var files = fs.readdirSync(dirPath);
+				var completions = files.filter((c) => (path + c).startsWith(args[1])).map((c) => fs.lstatSync(dirPath + c).isDirectory() ? c + '/' : c).filter((c) => c.endsWith('/') || c.endsWith('.nro'));
+				return [completions, matchPiece];
+			} catch (e) {
+				throw e;
+			}			
+		},
+		setup: function (args, callback) {
+			try {
+				var filepath = path.resolve(__dirname, args[0]);
+				fs.statSync(filepath);
+				return [Array.from(new Uint8Array(fs.readFileSync(filepath).buffer))];
+			} catch (e) {
+				return callback(null, 'invalid file ' + e.message);
+			}
+		}
+	},
 	enable: {
 		help: 'enable <property>',
 		helptxt: 'Set the config property to `true`',
@@ -202,7 +233,7 @@ const fns = {
 		},
 		complete(line) {
 			var args = line.split(" ");
-			var names = Object.keys(connections).concat(Object.keys(nameToAddr)).filter(lookupConnection);
+			var names = Object.keys(connections).filter((k) => connections[k]).concat(Object.keys(nameToAddr)).filter(lookupConnection);
 			var completions = names;
 			completions.push("none");
 			return [args[1].length ? completions.filter((k) => k.startsWith(args[1]) && k.length > 0) : completions, args[1]];
@@ -215,10 +246,12 @@ const fns = {
 		setup(args, callback) {
 			var t = new Table();
 			Object.values(connections).forEach((ws) => {
-				t.cell("Wi-Fi MAC Address", ws.macAddr);
-				t.cell("Version", ws.fwVersion);
-				t.cell("Name", ws.name || "<unnamed>");
-				t.newRow();
+				if(ws != null) {
+					t.cell("Wi-Fi MAC Address", ws.macAddr);
+					t.cell("Version", ws.fwVersion);
+					t.cell("Name", ws.name || "<unnamed>");
+					t.newRow();
+				}
 			});
 			console.log(t.toString());
 			return callback();
@@ -419,7 +452,7 @@ function selectConsole(mac) {
 
 wss.on('connection', function (ws) {
 	ws.on('close', function () {
-		if(ws.macAddr) {
+		if(ws.macAddr && connections[ws.macAddr] == ws) {
 			connections[ws.macAddr] = null;
 			console.log();
 			console.log("Switch '" + consoleName(ws.macAddr) + "' (" + ws.fwVersion + ") disconnected.");
@@ -453,7 +486,7 @@ wss.on('connection', function (ws) {
 			connections[mac] = ws;
 			console.log();
 			console.log("Switch '" + consoleName(mac) + "' (" + data.version + ") connected.");
-			if(connection === null) {
+			if(connection === null || connection.macAddr == mac) {
 				selectConsole(mac);
 			} else {
 				r.prompt(true);
